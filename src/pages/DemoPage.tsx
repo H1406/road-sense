@@ -21,6 +21,7 @@ const DemoPage = () => {
   const [cameraActive, setCameraActive] = useState(false);
   const [liveResult, setLiveResult] = useState<DetectionResult | null>(null);
   const [isDetecting, setIsDetecting] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -54,16 +55,19 @@ const DemoPage = () => {
 
   const startCamera = useCallback(async () => {
     try {
+      setCameraError(null);
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } },
       });
       streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-      }
       setCameraActive(true);
       setLiveResult(null);
+
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const video = videoRef.current;
+      if (!video) throw new Error("Video element is not ready");
+      video.srcObject = stream;
+      await video.play();
 
       // Detection loop — send frame every 1.2s
       detectIntervalRef.current = setInterval(async () => {
@@ -89,6 +93,13 @@ const DemoPage = () => {
         }, "image/jpeg", 0.85);
       }, 1200);
     } catch (err) {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+      }
+      setCameraActive(false);
+      setIsDetecting(false);
+      setCameraError(err instanceof Error ? err.message : "Unable to start camera");
       console.error("Camera error:", err);
     }
   }, []);
@@ -96,10 +107,12 @@ const DemoPage = () => {
   const stopCamera = useCallback(() => {
     if (detectIntervalRef.current) clearInterval(detectIntervalRef.current);
     if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
+    if (videoRef.current) videoRef.current.srcObject = null;
     streamRef.current = null;
     setCameraActive(false);
     setLiveResult(null);
     setIsDetecting(false);
+    setCameraError(null);
   }, []);
 
   // Stop camera on unmount or when switching away
@@ -233,6 +246,7 @@ const DemoPage = () => {
                   </div>
                   <p className="text-sm font-semibold mb-1">Live Camera</p>
                   <p className="text-xs text-muted-foreground mb-6">Real-time rubbish detection</p>
+                  {cameraError && <p className="text-xs text-destructive mb-4">{cameraError}</p>}
                   <button
                     onClick={startCamera}
                     className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:brightness-110 transition-all"
@@ -248,6 +262,7 @@ const DemoPage = () => {
                   ref={videoRef}
                   className="absolute inset-0 w-full h-full object-contain"
                   playsInline
+                  autoPlay
                   muted
                 />
 
